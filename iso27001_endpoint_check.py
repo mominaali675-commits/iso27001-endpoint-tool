@@ -600,10 +600,31 @@ def run_assessment():
 # ─────────────────────────────────────────────
 # EXPORT TO EXCEL
 # ─────────────────────────────────────────────
+def get_desktop_path():
+    """Get the Desktop path on Windows or fallback."""
+    # Try USERPROFILE env var first (most reliable on Windows)
+    userprofile = os.environ.get("USERPROFILE", "")
+    if userprofile:
+        desktop = os.path.join(userprofile, "Desktop")
+        if os.path.isdir(desktop):
+            return desktop
+    # Try HOMEDRIVE+HOMEPATH (Windows terminal server)
+    homedrive = os.environ.get("HOMEDRIVE", "")
+    homepath = os.environ.get("HOMEPATH", "")
+    if homedrive and homepath:
+        desktop = os.path.join(homedrive + homepath, "Desktop")
+        if os.path.isdir(desktop):
+            return desktop
+    # Fallback
+    return os.path.join(os.environ.get("HOME", os.getcwd()), "Desktop")
+
+
 def export_excel(host_info, results, total_score, max_total):
     filename = f"iso27001_endpoint_assessment_{datetime.date.today().isoformat()}.xlsx"
-    filepath = os.path.join(os.path.expanduser("~"), "Desktop", filename)
+    desktop = get_desktop_path()
+    filepath = os.path.join(desktop, filename)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    print(f"[DEBUG] Writing Excel to: {filepath}")
 
     if OPENPYXL_AVAILABLE:
         _export_openpyxl(filepath, host_info, results, total_score, max_total)
