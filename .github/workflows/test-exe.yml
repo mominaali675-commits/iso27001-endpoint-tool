@@ -7,66 +7,58 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - name: Download the .exe
-        shell: powershell
+      - name: Check network connectivity
+        shell: cmd
         run: |
-          $exeUrl = "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment_GUI.exe"
-          $exeName = "ISO27001_Endpoint_Assessment.exe"
-          Write-Host "Downloading..."
-          # Use curl.exe (not PowerShell alias) with -L for redirects
-          C:\Windows\System32\curl.exe -L -o "$env:TEMP\$exeName" "$exeUrl"
-          $size = (Get-Item "$env:TEMP\$exeName").Length
-          Write-Host "Downloaded: $([math]::Round($size/1MB, 1)) MB"
+          curl -I https://github.com 2>&1 | findstr "HTTP Location"
 
-      - name: Run exe and capture full output
+      - name: Download the .exe directly from repo
+        shell: cmd
+        run: |
+          curl -L -o "%TEMP%\ISO27001_Endpoint_Assessment.exe" ^
+            "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment.exe"
+          dir "%TEMP%\ISO27001_Endpoint_Assessment.exe"
+
+      - name: Run exe with full capture
         id: run
         shell: powershell
         continue-on-error: true
         run: |
-          $ErrorActionPreference = 'Continue'
           $exePath = "$env:TEMP\ISO27001_Endpoint_Assessment.exe"
           $start = Get-Date
-          Write-Host "=== Running EXE at $start ==="
+          Write-Host "=== Running EXE ==="
+          Write-Host "Start: $start"
+          Write-Host "File size: $((Get-Item $exePath).Length) bytes"
           
-          $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru
+          $proc = Start-Process -FilePath $exePath -PassThru
+          Start-Sleep 15
+          
+          $hasExited = $proc.HasExited
           $exitCode = $proc.ExitCode
           $duration = (Get-Date) - $start
           
           Write-Host "=== RESULT ==="
+          Write-Host "HasExited: $hasExited"
           Write-Host "Exit Code: $exitCode"
           Write-Host "Duration: $($duration.TotalSeconds) seconds"
 
           $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Write-Host "=== Desktop files ==="
-          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
+          $allFiles = Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
+          Write-Host "=== Desktop files ($($allFiles.Count) files) ==="
+          $allFiles | Format-Table -AutoSize
 
           $xlsxFiles = Get-ChildItem $desktopPath -Filter "*.xlsx" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
           if ($xlsxFiles) {
-            Write-Host "=== EXCEL FILES FOUND: $($xlsxFiles.Count} ==="
+            Write-Host "=== EXCEL FILES FOUND ==="
             $xlsxFiles | Format-Table Name, Length, LastWriteTime -AutoSize
           } else {
-            Write-Host "NO .xlsx files on Desktop"
+            Write-Host "NO .xlsx files found on Desktop"
           }
-          
-          Write-Host "=== APPDATA ==="
-          $appdataPath = $env:APPDATA
-          Write-Host "AppData: $appdataPath"
-          Get-ChildItem $appdataPath -ErrorAction SilentlyContinue | Select-Object -First 15 Name
-          
-          Write-Host "=== LOCALAPPDATA ==="
-          $localAppData = $env:LOCALAPPDATA
-          Write-Host "LocalAppData: $localAppData"
-          Get-ChildItem $localAppData -ErrorAction SilentlyContinue | Select-Object -First 10 Name
 
-      - name: Deep diagnostic
+      - name: Diagnostic on failure
         if: always()
         shell: powershell
         run: |
+          Write-Host "=== DESKTOP DIRECTORY ==="
           $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Write-Host "=== ALL DESKTOP FILES ==="
           Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Format-Table Name, Length, LastWriteTime -AutoSize
-          
-          Write-Host "=== CHECK PYINSTALLER TEMP DIR ==="
-          $tempXlsx = Get-ChildItem $env:TEMP -Filter "*.xlsx" -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 FullName
-          if ($tempXlsx) { $tempXlsx | Format-Table FullName, Length -AutoSize }
-          else { Write-Host "No xlsx in TEMP" }
