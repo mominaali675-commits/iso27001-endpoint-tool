@@ -39,8 +39,18 @@ try:
 except ImportError:
     XLWT_AVAILABLE = False
 
+# ─── Diagnostics log ──────────────────────────────────────────────────────
+LOG_FILE = os.path.join(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")), "iso27001_diag.log")
 
-# ─── Windows API helpers ────────────────────────────────────────────────────
+def _log(msg):
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(f"{datetime.datetime.now().isoformat()} | {msg}\n")
+    except Exception:
+        pass
+
+
+# ─── Windows API helpers ───────────────────────────────────────────────────
 def get_user_profile_dir():
     try:
         buf = ctypes.create_unicode_buffer(512)
@@ -64,7 +74,7 @@ def get_desktop_path():
     return os.path.join(os.getcwd(), "Desktop")
 
 
-# ─── Headless detection ──────────────────────────────────────────────────────
+# ─── Headless detection ───────────────────────────────────────────────────
 def _is_headless():
     """Return True if no display is available."""
     try:
@@ -109,10 +119,7 @@ def run_cmd(cmd, timeout=10):
 
 # ─── Controls ──────────────────────────────────────────────────────────────
 def check_a81_endpoint_policy():
-    checks = [
-        "C:\\Windows\\System32\\GroupPolicy",
-        "C:\\Windows\\System32\\GroupPolicyUsers",
-    ]
+    checks = ["C:\\Windows\\System32\\GroupPolicy", "C:\\Windows\\System32\\GroupPolicyUsers"]
     found = [p for p in checks if os.path.exists(p)]
     evidence = f"GP folder present: {', '.join(found) if found else 'Not found'}"
     return len(found) > 0, "Group Policy configured", evidence
@@ -254,8 +261,10 @@ def check_a824_cryptography():
 
 
 def check_a825_sdlc():
-    dev_tools = ["C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git",
-                 "C:\\Program Files\\Microsoft Visual Studio", "C:\\Program Files\\Docker"]
+    dev_tools = [
+        "C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git",
+        "C:\\Program Files\\Microsoft Visual Studio", "C:\\Program Files\\Docker",
+    ]
     found = [t for t in dev_tools if os.path.exists(t)]
     evidence = f"Dev tools: {', '.join([os.path.basename(f) for f in found]) if found else 'None detected'}"
     return len(found) == 0, f"Dev tools: {'None' if not found else ', '.join([os.path.basename(f) for f in found])}", evidence
@@ -302,7 +311,7 @@ CONTROLS = [
 ]
 
 
-# ─── Assessment Runner ──────────────────────────────────────────────────────
+# ─── Assessment Runner ────────────────────────────────────────────────────
 def run_assessment(progress_callback=None):
     host_info = get_host_info()
     results = []
@@ -339,7 +348,7 @@ def run_assessment(progress_callback=None):
     return host_info, results, total_score, max_total
 
 
-# ─── Excel Export ────────────────────────────────────────────────────────────
+# ─── Excel Export ──────────────────────────────────────────────────────────
 def export_excel(host_info, results, total_score, max_total):
     filename = f"iso27001_endpoint_assessment_{datetime.date.today().isoformat()}.xlsx"
     desktop = get_desktop_path()
@@ -377,8 +386,10 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
     bold_dark = Font(color="1A1A2E", bold=True, name="Calibri", size=10)
     center = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    thin = Border(left=Side(style="thin",color="BDD7EE"), right=Side(style="thin",color="BDD7EE"),
-                  top=Side(style="thin",color="BDD7EE"), bottom=Side(style="thin",color="BDD7EE"))
+    thin = Border(
+        left=Side(style="thin", color="BDD7EE"), right=Side(style="thin", color="BDD7EE"),
+        top=Side(style="thin", color="BDD7EE"), bottom=Side(style="thin", color="BDD7EE"),
+    )
 
     def hdr(row, col, text, fill=navy_fill, font=None, align=center):
         c = ws1.cell(row=row, column=col, value=text)
@@ -390,20 +401,23 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
         c.font = font or (bold_dark if bold else dark)
         c.alignment = align; c.border = thin; return c
 
-    # Title
+    # ── Sheet 1: Executive Summary ──────────────────────────────────────────
     ws1.merge_cells("A1:F1")
     t = ws1["A1"]
     t.value = "SHAH SCIENTIFIC SOLUTIONS — ISO 27001:2022 ENDPOINT ASSESSMENT"
-    t.fill = navy_fill; t.font = Font(color="FFFFFF", bold=True, size=13, name="Calibri"); t.alignment = center
+    t.fill = navy_fill
+    t.font = Font(color="FFFFFF", bold=True, size=13, name="Calibri")
+    t.alignment = center
     ws1.row_dimensions[1].height = 28
 
     ws1.merge_cells("A2:F2")
     t2 = ws1["A2"]
     t2.value = "Annex A.8 Technical Controls | Endpoint Assessment | vCISO Practice"
-    t2.fill = blue_fill; t2.font = Font(color="FFFFFF", italic=True, size=10, name="Calibri"); t2.alignment = center
+    t2.fill = blue_fill
+    t2.font = Font(color="FFFFFF", italic=True, size=10, name="Calibri")
+    t2.alignment = center
     ws1.row_dimensions[2].height = 18
 
-    # Host info
     row = 4
     ws1.merge_cells(f"A{row}:F{row}")
     hdr(row, 1, "ASSESSMENT DETAILS", fill=blue_fill)
@@ -439,24 +453,26 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
     ws1.merge_cells(f"A{row}:C{row}")
     sc = ws1[f"A{row}"]
     sc.value = f"{total_score} / {max_total}"
-    sc.fill = score_fill; sc.font = Font(size=26, bold=True, color=score_font_color, name="Calibri"); sc.alignment = center
+    sc.fill = score_fill
+    sc.font = Font(size=26, bold=True, color=score_font_color, name="Calibri")
+    sc.alignment = center
     ws1.row_dimensions[row].height = 48
 
     ws1.merge_cells(f"D{row}:F{row}")
     sp = ws1[f"D{row}"]
     sp.value = f"{overall_pct}%\n{score_label}"
-    sp.fill = score_fill; sp.font = Font(size=13, bold=True, color=score_font_color, name="Calibri")
+    sp.fill = score_fill
+    sp.font = Font(size=13, bold=True, color=score_font_color, name="Calibri")
     sp.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws1.row_dimensions[row].height = 48
 
-    # Category breakdown
     row += 2
     ws1.merge_cells(f"A{row}:F{row}")
     hdr(row, 1, "SCORE BY CATEGORY", fill=blue_fill)
     ws1.row_dimensions[row].height = 18
 
     row += 1
-    for col, txt in enumerate(["Category","Controls","Score","Max","Percentage","Status"], 1):
+    for col, txt in enumerate(["Category", "Controls", "Score", "Max", "Percentage", "Status"], 1):
         hdr(row, col, txt)
 
     categories = {}
@@ -480,7 +496,7 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
         dat(row, 4, str(data["max"]))
         dat(row, 5, f"{cat_pct}%", fill=cf_fill, font=Font(bold=True, color=cf_font_color))
         dat(row, 6, "GOOD" if cat_pct >= 80 else "PARTIAL" if cat_pct >= 50 else "POOR",
-           fill=cf_fill, font=Font(bold=True, color=cf_font_color))
+            fill=cf_fill, font=Font(bold=True, color=cf_font_color))
         ws1.row_dimensions[row].height = 15
 
     ws1.column_dimensions["A"].width = 28
@@ -490,16 +506,18 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
     ws1.column_dimensions["E"].width = 12
     ws1.column_dimensions["F"].width = 14
 
-    # Sheet 2 — Full Checklist
+    # ── Sheet 2: Controls Checklist ───────────────────────────────────────────
     ws2 = wb.create_sheet("Controls Checklist")
     ws2.merge_cells("A1:H1")
     t3 = ws2["A1"]
     t3.value = "ISO 27001:2022 ANNEX A.8 — TECHNICAL CONTROLS CHECKLIST"
-    t3.fill = navy_fill; t3.font = Font(color="FFFFFF", bold=True, size=12, name="Calibri"); t3.alignment = center
+    t3.fill = navy_fill
+    t3.font = Font(color="FFFFFF", bold=True, size=12, name="Calibri")
+    t3.alignment = center
     ws2.row_dimensions[1].height = 25
 
-    headers = ["Control ID","Title","Category","Status","Score","Max Score","Findings","Evidence"]
-    widths = [12,30,20,10,8,10,40,55]
+    headers = ["Control ID", "Title", "Category", "Status", "Score", "Max Score", "Findings", "Evidence"]
+    widths = [12, 30, 20, 10, 8, 10, 40, 55]
     for col, (hdr_txt, w) in enumerate(zip(headers, widths), 1):
         c = ws2.cell(row=2, column=col, value=hdr_txt)
         c.fill = blue_fill; c.font = white_font; c.alignment = center; c.border = thin
@@ -518,14 +536,18 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
         else:
             sfill = PatternFill("solid", fgColor="FFC7CE"); scolor = "9C0006"
 
-        vals = [r2["id"], r2["title"], r2["category"], r2["status"],
-                f"{sc_val}/{max_sc}" if max_sc > 0 else "N/A",
-                str(max_sc) if max_sc > 0 else "N/A",
-                r2["value"], r2["evidence"]]
+        vals = [
+            r2["id"], r2["title"], r2["category"], r2["status"],
+            f"{sc_val}/{max_sc}" if max_sc > 0 else "N/A",
+            str(max_sc) if max_sc > 0 else "N/A",
+            r2["value"], r2["evidence"],
+        ]
         for col, val in enumerate(vals, 1):
             c = ws2.cell(row=row_n, column=col, value=val)
-            c.fill = sfill; c.font = Font(color=scolor, name="Calibri", size=9)
-            c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True); c.border = thin
+            c.fill = sfill
+            c.font = Font(color=scolor, name="Calibri", size=9)
+            c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            c.border = thin
         ws2.row_dimensions[row_n].height = 40
 
     wb.save(filepath)
@@ -537,7 +559,7 @@ def _export_xlwt_fallback(filepath, host_info, results, total_score, max_total):
     ws = wb.add_sheet("ISO27001 Controls")
     style_hdr = xlwt.XFStyle()
     style_hdr.font.bold = True
-    headers = ["Control ID","Title","Category","Status","Score","Max Score","Findings"]
+    headers = ["Control ID", "Title", "Category", "Status", "Score", "Max Score", "Findings"]
     for col, h in enumerate(headers):
         ws.write(0, col, h, style_hdr)
     for i, r2 in enumerate(results):
@@ -552,7 +574,7 @@ def _export_xlwt_fallback(filepath, host_info, results, total_score, max_total):
     wb.save(filepath)
 
 
-# ─── GUI App ────────────────────────────────────────────────────────────────
+# ─── GUI App ───────────────────────────────────────────────────────────────
 def run_gui():
     root = tk.Tk()
     root.title("ISO 27001 Endpoint Assessment — Shah Scientific Solutions")
@@ -610,13 +632,16 @@ def run_gui():
         result_label2 = tk.Label(progress_frame, text=f"{total_score} / {max_total}  ({overall_pct}%)",
                                  bg=bg_color, fg=txt_color, font=("Calibri", 26, "bold"))
         result_label2.pack(pady=(8, 4))
-
         tk.Label(progress_frame, text=status_text, bg=bg_color, fg=txt_color,
                  font=("Calibri", 12, "bold")).pack()
 
-        tk.Label(progress_frame, text=f"\nReport saved to Desktop:\n{os.path.basename(filepath)}",
-                 bg="#DEEAF1", fg="#1F4E79", font=("Calibri", 10),
-                 wraplength=500).pack(pady=(12, 0))
+        if filepath:
+            tk.Label(progress_frame, text=f"\nReport saved to Desktop:\n{os.path.basename(filepath)}",
+                     bg="#DEEAF1", fg="#1F4E79", font=("Calibri", 10),
+                     wraplength=500).pack(pady=(12, 0))
+        else:
+            tk.Label(progress_frame, text="\nAssessment complete.", bg="#DEEAF1", fg="#1F4E79",
+                     font=("Calibri", 10), wraplength=500).pack(pady=(12, 0))
 
         btn_frame = tk.Frame(progress_frame, bg="#DEEAF1")
         btn_frame.pack(pady=(10, 0))
@@ -651,7 +676,7 @@ def run_gui():
     root.mainloop()
 
 
-# ─── Console Mode ────────────────────────────────────────────────────────────
+# ─── Console Mode ─────────────────────────────────────────────────────────
 def run_console():
     desktop = get_desktop_path()
     print("=" * 60)
@@ -659,6 +684,7 @@ def run_console():
     print("Shah Scientific Solutions | vCISO Practice")
     print("=" * 60)
     print(f"Desktop path: {desktop}")
+    _log(f"run_console() desktop={desktop}")
     host_info = get_host_info()
     print(f"\nHost: {host_info['hostname']} | User: {host_info['username']}")
     print(f"OS: {host_info['os']}")
@@ -673,37 +699,43 @@ def run_console():
     print(f"\nSCORE: {total_score} / {max_total}  ({overall_pct}%)")
     filepath = export_excel(host_info, results, total_score, max_total)
     print(f"Report: {filepath}")
+    _log(f"exported to {filepath}")
     return filepath
 
 
-# ─── Main ──────────────────────────────────────────────────────────────────
+# ─── Main ─────────────────────────────────────────────────────────────────
 def main():
     headless = _is_headless()
     _desktop = get_desktop_path()
+    _log(f"main() start — headless={headless}, desktop={_desktop}, TK_AVAILABLE={TK_AVAILABLE}")
     try:
         if TK_AVAILABLE:
             try:
                 test_root = tk.Tk()
                 test_root.withdraw()
                 test_root.destroy()
+                _log("GUI test passed, launching GUI")
                 run_gui()
             except Exception as e:
-                print(f"[DIAG] GUI init failed: {e}")
-                print(f"[DIAG] Headless={headless}, Desktop={_desktop}")
+                _log(f"GUI init failed: {e} — headless={headless}")
                 if headless:
                     run_console()
                 else:
+                    _log("not headless, showing error dialog")
                     import tkinter.messagebox
-                    tkinter.messagebox.showerror("ISO 27001 Assessment",
-                        f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.")
+                    tkinter.messagebox.showerror(
+                        "ISO 27001 Assessment",
+                        f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.",
+                    )
                     raise SystemExit(1)
         else:
-            print(f"[DIAG] TK not available, Desktop={_desktop}")
+            _log("TK not available, running console")
             run_console()
     except SystemExit:
+        _log("SystemExit raised")
         raise
     except Exception as e:
-        print(f"[DIAG] Fatal: {e}")
+        _log(f"Fatal exception: {e}")
         if not headless:
             try:
                 import tkinter.messagebox
@@ -711,6 +743,8 @@ def main():
             except Exception:
                 print(f"Fatal error: {e}")
         raise SystemExit(1)
+
+    _log("main() complete normally")
 
 
 if __name__ == "__main__":
