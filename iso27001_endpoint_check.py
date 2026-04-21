@@ -635,7 +635,7 @@ def run_gui():
         tk.Label(progress_frame, text=status_text, bg=bg_color, fg=txt_color,
                  font=("Calibri", 12, "bold")).pack()
 
-        if filepath:
+        if filepath and os.path.basename(filepath):
             tk.Label(progress_frame, text=f"\nReport saved to Desktop:\n{os.path.basename(filepath)}",
                      bg="#DEEAF1", fg="#1F4E79", font=("Calibri", 10),
                      wraplength=500).pack(pady=(12, 0))
