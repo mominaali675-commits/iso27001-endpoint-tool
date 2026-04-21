@@ -692,13 +692,21 @@ def main():
                 test_root.destroy()
                 run_gui()
             except Exception as e:
-                print(f"GUI unavailable ({e}), falling back to console mode.")
-                run_console()
+                import tkinter.messagebox
+                tkinter.messagebox.showerror("ISO 27001 Assessment",
+                    f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead:\npython iso27001_endpoint_check.py")
+                raise SystemExit(1)
         else:
             run_console()
+    except SystemExit:
+        raise
     except Exception as e:
-        print(f"Fatal error: {e}")
-        input("Press Enter to exit...")
+        try:
+            import tkinter.messagebox
+            tkinter.messagebox.showerror("ISO 27001 Assessment", f"Fatal error: {e}")
+        except Exception:
+            print(f"Fatal error: {e}")
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()
