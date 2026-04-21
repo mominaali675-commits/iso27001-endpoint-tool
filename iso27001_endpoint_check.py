@@ -682,8 +682,26 @@ def run_console():
     print(f"Report: {export_excel(host_info, results, total_score, max_total)}")
 
 
-# ─── Main ───────────────────────────────────────────────────────────────────
+def _is_headless():
+    """Detect if we're in a headless environment (no display)."""
+    try:
+        display = os.environ.get("DISPLAY", "")
+        if not display:
+            return True
+    except Exception:
+        pass
+    # On Windows, check if we're in a console-only environment
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            user32 = ctypes.windll.user32
+            return user32.GetSystemMetrics(0) == 0  # SM_CXSCREEN = 0 means no display
+    except Exception:
+        pass
+    return False
+
 def main():
+    headless = _is_headless()
     try:
         if TK_AVAILABLE:
             try:
@@ -692,21 +710,34 @@ def main():
                 test_root.destroy()
                 run_gui()
             except Exception as e:
-                import tkinter.messagebox
-                tkinter.messagebox.showerror("ISO 27001 Assessment",
-                    f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead:\npython iso27001_endpoint_check.py")
-                raise SystemExit(1)
+                if headless:
+                    # In headless environment, just run the console version silently
+                    run_console()
+                else:
+                    import tkinter.messagebox
+                    tkinter.messagebox.showerror("ISO 27001 Assessment",
+                        f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.\nSee: github.com/mominaali675-commits/iso27001-endpoint-tool")
+                    raise SystemExit(1)
         else:
             run_console()
     except SystemExit:
         raise
     except Exception as e:
+        import traceback
+        err_file = os.path.join(os.environ.get("TEMP", "/tmp"), "iso27001_error.log")
         try:
-            import tkinter.messagebox
-            tkinter.messagebox.showerror("ISO 27001 Assessment", f"Fatal error: {e}")
+            with open(err_file, "w") as f:
+                f.write(traceback.format_exc())
         except Exception:
-            print(f"Fatal error: {e}")
+            pass
+        if not headless:
+            try:
+                import tkinter.messagebox
+                tkinter.messagebox.showerror("ISO 27001 Assessment", f"Fatal error: {e}")
+            except Exception:
+                print(f"Fatal error: {e}")
         raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()
