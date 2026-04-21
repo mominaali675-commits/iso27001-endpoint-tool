@@ -10,15 +10,15 @@ jobs:
       - name: Download the .exe
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
           $exeUrl = "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment_GUI.exe"
           $exeName = "ISO27001_Endpoint_Assessment.exe"
-          Write-Host "Downloading from: $exeUrl"
-          curl -L -o "$env:TEMP\$exeName" "$exeUrl"
+          Write-Host "Downloading..."
+          # Use curl.exe (not PowerShell alias) with -L for redirects
+          C:\Windows\System32\curl.exe -L -o "$env:TEMP\$exeName" "$exeUrl"
           $size = (Get-Item "$env:TEMP\$exeName").Length
-          Write-Host "Downloaded: $($size / 1MB) MB"
+          Write-Host "Downloaded: $([math]::Round($size/1MB, 1)) MB"
 
-      - name: Run exe with timeout and full capture
+      - name: Run exe and capture full output
         id: run
         shell: powershell
         continue-on-error: true
@@ -26,8 +26,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $exePath = "$env:TEMP\ISO27001_Endpoint_Assessment.exe"
           $start = Get-Date
-          Write-Host "=== Running EXE ==="
-          Write-Host "Start time: $start"
+          Write-Host "=== Running EXE at $start ==="
           
           $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru
           $exitCode = $proc.ExitCode
@@ -38,33 +37,36 @@ jobs:
           Write-Host "Duration: $($duration.TotalSeconds) seconds"
 
           $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Write-Host "=== Desktop files after run ==="
-          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 10 Name, Length, LastWriteTime
+          Write-Host "=== Desktop files ==="
+          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
 
-          # Check for xlsx files
-          $xlsxFiles = Get-ChildItem $desktopPath -Filter "*.xlsx" -ErrorAction SilentlyContinue
+          $xlsxFiles = Get-ChildItem $desktopPath -Filter "*.xlsx" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
           if ($xlsxFiles) {
-            Write-Host "=== EXCEL FILES FOUND ==="
-            $xlsxFiles | Sort-Object LastWriteTime -Descending | Format-Table Name, Length, LastWriteTime -AutoSize
-            Write-Host "Most recent: $($xlsxFiles[0].FullName)"
+            Write-Host "=== EXCEL FILES FOUND: $($xlsxFiles.Count} ==="
+            $xlsxFiles | Format-Table Name, Length, LastWriteTime -AutoSize
           } else {
-            Write-Host "No .xlsx files found on Desktop"
+            Write-Host "NO .xlsx files on Desktop"
           }
           
-          # Write exit code
-          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "=== APPDATA ==="
+          $appdataPath = $env:APPDATA
+          Write-Host "AppData: $appdataPath"
+          Get-ChildItem $appdataPath -ErrorAction SilentlyContinue | Select-Object -First 15 Name
+          
+          Write-Host "=== LOCALAPPDATA ==="
+          $localAppData = $env:LOCALAPPDATA
+          Write-Host "LocalAppData: $localAppData"
+          Get-ChildItem $localAppData -ErrorAction SilentlyContinue | Select-Object -First 10 Name
 
-      - name: Full workspace diagnostic
+      - name: Deep diagnostic
         if: always()
         shell: powershell
         run: |
-          Write-Host "=== RECENT DESKTOP FILES ==="
           $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 20 Name, Length, LastWriteTime
+          Write-Host "=== ALL DESKTOP FILES ==="
+          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Format-Table Name, Length, LastWriteTime -AutoSize
           
-          Write-Host "=== TEMP FILES (recent .xlsx) ==="
-          Get-ChildItem $env:TEMP -Filter "*.xlsx" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 Name, Length, FullName
-          
-          Write-Host "=== USERPROFILE ==="
-          Write-Host $env:USERPROFILE
-          Get-ChildItem $env:USERPROFILE -ErrorAction SilentlyContinue | Select-Object -First 10 Name
+          Write-Host "=== CHECK PYINSTALLER TEMP DIR ==="
+          $tempXlsx = Get-ChildItem $env:TEMP -Filter "*.xlsx" -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 FullName
+          if ($tempXlsx) { $tempXlsx | Format-Table FullName, Length -AutoSize }
+          else { Write-Host "No xlsx in TEMP" }
