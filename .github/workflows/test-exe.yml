@@ -19,28 +19,37 @@ jobs:
             "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment.exe"
           dir "%TEMP%\ISO27001_Endpoint_Assessment.exe"
 
-      - name: Run exe with full capture
+      - name: Run exe and wait for completion
         id: run
         shell: powershell
         continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           $exePath = "$env:TEMP\ISO27001_Endpoint_Assessment.exe"
           $start = Get-Date
           Write-Host "=== Running EXE ==="
           Write-Host "Start: $start"
           Write-Host "File size: $((Get-Item $exePath).Length) bytes"
-          
+          Write-Host "Desktop: $([Environment]::GetFolderPath('Desktop'))"
+
+          # Start and wait for process to exit
           $proc = Start-Process -FilePath $exePath -PassThru
-          Start-Sleep 15
-          
+          Write-Host "Started process PID: $($proc.Id)"
+
+          # Wait up to 60 seconds for process to exit
+          $proc.WaitForExit(60000)
           $hasExited = $proc.HasExited
           $exitCode = $proc.ExitCode
           $duration = (Get-Date) - $start
-          
+
           Write-Host "=== RESULT ==="
           Write-Host "HasExited: $hasExited"
           Write-Host "Exit Code: $exitCode"
           Write-Host "Duration: $($duration.TotalSeconds) seconds"
+
+          # Give filesystem a moment to flush
+          Start-Sleep 3
 
           $desktopPath = [Environment]::GetFolderPath('Desktop')
           $allFiles = Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
@@ -62,3 +71,9 @@ jobs:
           Write-Host "=== DESKTOP DIRECTORY ==="
           $desktopPath = [Environment]::GetFolderPath('Desktop')
           Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Format-Table Name, Length, LastWriteTime -AutoSize
+
+          Write-Host "=== EVENT LOG (Application) ==="
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5)} -MaxEvents 10 2>$null | Select-Object TimeCreated, Message | Format-List
+
+          Write-Host "=== ORPHAN PROCESSES ==="
+          Get-Process | Where-Object { $_.ProcessName -like "*ISO27001*" } | Format-Table ProcessName, Id, Path -AutoSize
