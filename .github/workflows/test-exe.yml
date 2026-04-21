@@ -1,0 +1,69 @@
+name: Test EXE on Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      exe_url:
+        description: 'Direct URL to the .exe'
+        required: true
+        type: string
+      exe_name:
+        description: 'Filename for the .exe'
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Download the .exe
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "Downloading ${{ inputs.exe_name }}..."
+          curl -L -o "${{ github.workspace }}\${{ inputs.exe_name }}" "${{ inputs.exe_url }}"
+          Write-Host "Download complete. Size:"
+          Get-Item "${{ github.workspace }}\${{ inputs.exe_name }}" | Select-Object -ExpandProperty Length
+
+      - name: Run the exe with full output capture
+        id: run
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Write-Host "=== Running ${{ inputs.exe_name }} ==="
+          $start = Get-Date
+          $proc = Start-Process -FilePath "${{ github.workspace }}\${{ inputs.exe_name }}" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "${{ github.workspace }}\stdout.txt" -RedirectStandardError "${{ github.workspace }}\stderr.txt"
+          $exitCode = $proc.ExitCode
+          $duration = (Get-Date) - $start
+          Write-Host "=== Exit Code: $exitCode ==="
+          Write-Host "Duration: $($duration.TotalSeconds)s"
+          Write-Host "=== STDOUT ==="
+          Get-Content "${{ github.workspace }}\stdout.txt" | Select-Object -Last 50
+          Write-Host "=== STDERR ==="
+          Get-Content "${{ github.workspace }}\stderr.txt" | Select-Object -Last 20
+          Write-Host "=== Desktop files after run ==="
+          $desktopPath = [Environment]::GetFolderPath('Desktop')
+          Get-ChildItem $desktopPath -Filter "*.xlsx" | Select-Object Name, Length, LastWriteTime
+          Write-Host "=== All files in Desktop ==="
+          Get-ChildItem $desktopPath | Select-Object Name, Length, LastWriteTime
+          # Set outputs
+          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          "${{ github.workspace }}\stdout.txt" | Out-File -FilePath "${{ github.workspace }}\exit_code.txt" -Encoding utf8
+
+      - name: Show all Desktop files (even on failure)
+        if: always()
+        shell: powershell
+        run: |
+          $desktopPath = [Environment]::GetFolderPath('Desktop')
+          Write-Host "=== All Desktop files ==="
+          Get-ChildItem $desktopPath | Format-Table Name, Length, LastWriteTime -AutoSize
+          Write-Host "=== Checking for Excel output ==="
+          Get-ChildItem $desktopPath -Filter "*.xlsx" | Format-Table Name, Length, LastWriteTime -AutoSize
+
+      - name: List workspace files
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "=== Workspace files ==="
+          Get-ChildItem "${{ github.workspace }}" | Format-Table Name, Length, LastWriteTime -AutoSize
