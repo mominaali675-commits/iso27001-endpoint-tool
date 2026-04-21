@@ -683,8 +683,22 @@ def run_console():
 
 
 # ─── Main ───────────────────────────────────────────────────────────────────
+def main():
+    try:
+        if TK_AVAILABLE:
+            try:
+                test_root = tk.Tk()
+                test_root.withdraw()
+                test_root.destroy()
+                run_gui()
+            except Exception as e:
+                print(f"GUI unavailable ({e}), falling back to console mode.")
+                run_console()
+        else:
+            run_console()
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        input("Press Enter to exit...")
+
 if __name__ == "__main__":
-    if TK_AVAILABLE:
-        run_gui()
-    else:
-        run_console()
+    main()
