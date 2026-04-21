@@ -19,7 +19,7 @@ jobs:
             "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment.exe"
           dir "%TEMP%\ISO27001_Endpoint_Assessment.exe"
 
-      - name: Run exe and wait for completion
+      - name: Run exe with output capture
         id: run
         shell: powershell
         continue-on-error: true
@@ -31,10 +31,13 @@ jobs:
           Write-Host "=== Running EXE ==="
           Write-Host "Start: $start"
           Write-Host "File size: $((Get-Item $exePath).Length) bytes"
-          Write-Host "Desktop: $([Environment]::GetFolderPath('Desktop'))"
+          $desktopPath = [Environment]::GetFolderPath('Desktop')
+          Write-Host "Desktop: $desktopPath"
 
-          # Start and wait for process to exit
-          $proc = Start-Process -FilePath $exePath -PassThru
+          # Redirect stdout/stderr to capture windowed-app output
+          $outFile = "$env:TEMP\iso_output.txt"
+          $errFile = "$env:TEMP\iso_errors.txt"
+          $proc = Start-Process -FilePath $exePath -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile -NoNewWindow
           Write-Host "Started process PID: $($proc.Id)"
 
           # Wait up to 60 seconds for process to exit
@@ -51,7 +54,20 @@ jobs:
           # Give filesystem a moment to flush
           Start-Sleep 3
 
-          $desktopPath = [Environment]::GetFolderPath('Desktop')
+          Write-Host "=== STDOUT ==="
+          if (Test-Path $outFile) {
+            Get-Content $outFile | Select-Object -First 30
+          } else {
+            Write-Host "(no stdout file)"
+          }
+
+          Write-Host "=== STDERR ==="
+          if (Test-Path $errFile) {
+            Get-Content $errFile | Select-Object -First 30
+          } else {
+            Write-Host "(no stderr file)"
+          }
+
           $allFiles = Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
           Write-Host "=== Desktop files ($($allFiles.Count) files) ==="
           $allFiles | Format-Table -AutoSize
