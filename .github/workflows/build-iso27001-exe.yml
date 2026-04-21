@@ -17,12 +17,20 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyinstaller openpyxl
-
-      - name: Build .exe with PyInstaller (windowed GUI, no console)
-        shell: cmd
         run: |
-          pyinstaller --windowed --onefile --name ISO27001_Endpoint_Assessment --add-data "iso27001_endpoint_check.py;." --clean --hidden-import=tkinter --hidden-import=tkinter.ttk --hidden-import=tkinter.messagebox iso27001_endpoint_check.py
+          pip install pyinstaller openpyxl
+
+      - name: Build .exe with PyInstaller (windowed GUI)
+        run: |
+          pyinstaller --onefile --name ISO27001_Endpoint_Assessment ^
+            --add-data "iso27001_endpoint_check.py;." ^
+            --windowed ^
+            --hidden-import=tkinter ^
+            --hidden-import=tkinter.ttk ^
+            --hidden-import=tkinter.messagebox ^
+            --hidden-import=tkinter.filedialog ^
+            --clean ^
+            iso27001_endpoint_check.py
 
       - name: Upload .exe artifact
         uses: actions/upload-artifact@v4
