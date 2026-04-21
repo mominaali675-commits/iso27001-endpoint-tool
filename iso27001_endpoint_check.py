@@ -679,6 +679,7 @@ def run_console():
 # ─── Main ──────────────────────────────────────────────────────────────────
 def main():
     headless = _is_headless()
+    _desktop = get_desktop_path()
     try:
         if TK_AVAILABLE:
             try:
@@ -687,6 +688,8 @@ def main():
                 test_root.destroy()
                 run_gui()
             except Exception as e:
+                print(f"[DIAG] GUI init failed: {e}")
+                print(f"[DIAG] Headless={headless}, Desktop={_desktop}")
                 if headless:
                     run_console()
                 else:
@@ -695,10 +698,12 @@ def main():
                         f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.")
                     raise SystemExit(1)
         else:
+            print(f"[DIAG] TK not available, Desktop={_desktop}")
             run_console()
     except SystemExit:
         raise
     except Exception as e:
+        print(f"[DIAG] Fatal: {e}")
         if not headless:
             try:
                 import tkinter.messagebox
