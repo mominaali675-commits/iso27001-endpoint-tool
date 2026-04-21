@@ -2,15 +2,6 @@ name: Test EXE on Windows
 
 on:
   workflow_dispatch:
-    inputs:
-      exe_url:
-        description: 'Direct URL to the .exe'
-        required: true
-        type: string
-      exe_name:
-        description: 'Filename for the .exe'
-        required: true
-        type: string
 
 jobs:
   test:
@@ -20,50 +11,60 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Write-Host "Downloading ${{ inputs.exe_name }}..."
-          curl -L -o "${{ github.workspace }}\${{ inputs.exe_name }}" "${{ inputs.exe_url }}"
-          Write-Host "Download complete. Size:"
-          Get-Item "${{ github.workspace }}\${{ inputs.exe_name }}" | Select-Object -ExpandProperty Length
+          $exeUrl = "https://github.com/mominaali675-commits/iso27001-endpoint-tool/releases/download/v1.0/ISO27001_Endpoint_Assessment_GUI.exe"
+          $exeName = "ISO27001_Endpoint_Assessment.exe"
+          Write-Host "Downloading from: $exeUrl"
+          curl -L -o "$env:TEMP\$exeName" "$exeUrl"
+          $size = (Get-Item "$env:TEMP\$exeName").Length
+          Write-Host "Downloaded: $($size / 1MB) MB"
 
-      - name: Run the exe with full output capture
+      - name: Run exe with timeout and full capture
         id: run
         shell: powershell
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Continue'
-          Write-Host "=== Running ${{ inputs.exe_name }} ==="
+          $exePath = "$env:TEMP\ISO27001_Endpoint_Assessment.exe"
           $start = Get-Date
-          $proc = Start-Process -FilePath "${{ github.workspace }}\${{ inputs.exe_name }}" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "${{ github.workspace }}\stdout.txt" -RedirectStandardError "${{ github.workspace }}\stderr.txt"
+          Write-Host "=== Running EXE ==="
+          Write-Host "Start time: $start"
+          
+          $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru
           $exitCode = $proc.ExitCode
           $duration = (Get-Date) - $start
-          Write-Host "=== Exit Code: $exitCode ==="
-          Write-Host "Duration: $($duration.TotalSeconds)s"
-          Write-Host "=== STDOUT ==="
-          Get-Content "${{ github.workspace }}\stdout.txt" | Select-Object -Last 50
-          Write-Host "=== STDERR ==="
-          Get-Content "${{ github.workspace }}\stderr.txt" | Select-Object -Last 20
+          
+          Write-Host "=== RESULT ==="
+          Write-Host "Exit Code: $exitCode"
+          Write-Host "Duration: $($duration.TotalSeconds) seconds"
+
+          $desktopPath = [Environment]::GetFolderPath('Desktop')
           Write-Host "=== Desktop files after run ==="
-          $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Get-ChildItem $desktopPath -Filter "*.xlsx" | Select-Object Name, Length, LastWriteTime
-          Write-Host "=== All files in Desktop ==="
-          Get-ChildItem $desktopPath | Select-Object Name, Length, LastWriteTime
-          # Set outputs
-          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
-          "${{ github.workspace }}\stdout.txt" | Out-File -FilePath "${{ github.workspace }}\exit_code.txt" -Encoding utf8
+          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 10 Name, Length, LastWriteTime
 
-      - name: Show all Desktop files (even on failure)
+          # Check for xlsx files
+          $xlsxFiles = Get-ChildItem $desktopPath -Filter "*.xlsx" -ErrorAction SilentlyContinue
+          if ($xlsxFiles) {
+            Write-Host "=== EXCEL FILES FOUND ==="
+            $xlsxFiles | Sort-Object LastWriteTime -Descending | Format-Table Name, Length, LastWriteTime -AutoSize
+            Write-Host "Most recent: $($xlsxFiles[0].FullName)"
+          } else {
+            Write-Host "No .xlsx files found on Desktop"
+          }
+          
+          # Write exit code
+          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Full workspace diagnostic
         if: always()
         shell: powershell
         run: |
+          Write-Host "=== RECENT DESKTOP FILES ==="
           $desktopPath = [Environment]::GetFolderPath('Desktop')
-          Write-Host "=== All Desktop files ==="
-          Get-ChildItem $desktopPath | Format-Table Name, Length, LastWriteTime -AutoSize
-          Write-Host "=== Checking for Excel output ==="
-          Get-ChildItem $desktopPath -Filter "*.xlsx" | Format-Table Name, Length, LastWriteTime -AutoSize
-
-      - name: List workspace files
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "=== Workspace files ==="
-          Get-ChildItem "${{ github.workspace }}" | Format-Table Name, Length, LastWriteTime -AutoSize
+          Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 20 Name, Length, LastWriteTime
+          
+          Write-Host "=== TEMP FILES (recent .xlsx) ==="
+          Get-ChildItem $env:TEMP -Filter "*.xlsx" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 Name, Length, FullName
+          
+          Write-Host "=== USERPROFILE ==="
+          Write-Host $env:USERPROFILE
+          Get-ChildItem $env:USERPROFILE -ErrorAction SilentlyContinue | Select-Object -First 10 Name
