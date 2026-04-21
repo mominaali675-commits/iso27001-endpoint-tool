@@ -33,6 +33,7 @@ jobs:
           Write-Host "File size: $((Get-Item $exePath).Length) bytes"
           $desktopPath = [Environment]::GetFolderPath('Desktop')
           Write-Host "Desktop: $desktopPath"
+          Write-Host "TEMP: $env:TEMP"
 
           # Redirect stdout/stderr to capture windowed-app output
           $outFile = "$env:TEMP\iso_output.txt"
@@ -66,6 +67,15 @@ jobs:
             Get-Content $errFile | Select-Object -First 30
           } else {
             Write-Host "(no stderr file)"
+          }
+
+          # Check the diagnostic log
+          $logFile = "$env:TEMP\iso27001_diag.log"
+          Write-Host "=== DIAGNOSTIC LOG ==="
+          if (Test-Path $logFile) {
+            Get-Content $logFile
+          } else {
+            Write-Host "(no diag log found at $logFile)"
           }
 
           $allFiles = Get-ChildItem $desktopPath -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15 Name, Length, LastWriteTime
