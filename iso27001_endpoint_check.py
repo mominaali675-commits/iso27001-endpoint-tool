@@ -15,9 +15,10 @@ import subprocess
 import json
 import re
 import ctypes
+import traceback
 from pathlib import Path
 
-# ─── GUI ───────────────────────────────────────────────────────────────────
+# ─── GUI ─────────────────────────────────────────────────────────────────
 try:
     import tkinter as tk
     from tkinter import ttk
@@ -25,8 +26,7 @@ try:
 except ImportError:
     TK_AVAILABLE = False
 
-
-# ─── Excel ──────────────────────────────────────────────────────────────────
+# ─── Excel ─────────────────────────────────────────────────────────────────
 try:
     import openpyxl
     OPENPYXL_AVAILABLE = True
@@ -40,36 +40,47 @@ except ImportError:
     XLWT_AVAILABLE = False
 
 
-# ─── Windows API helpers ─────────────────────────────────────────────────────
+# ─── Windows API helpers ────────────────────────────────────────────────────
 def get_user_profile_dir():
-    """Get user profile directory via Windows API."""
     try:
         buf = ctypes.create_unicode_buffer(512)
-        ctypes.windll.shell32.SHGetFolderPathW(None, 40, None, 0, buf)  # CSIDL_PROFILE = 40
+        ctypes.windll.shell32.SHGetFolderPathW(None, 40, None, 0, buf)
         return buf.value
     except Exception:
         return None
 
 
 def get_desktop_path():
-    """Get the Windows Desktop path reliably."""
-    # Try USERPROFILE env var first
     userprofile = os.environ.get("USERPROFILE", "")
     if userprofile:
         desktop = os.path.join(userprofile, "Desktop")
         if os.path.isdir(desktop):
             return desktop
-    # Try Windows API
     prof = get_user_profile_dir()
     if prof:
         desktop = os.path.join(prof, "Desktop")
         if os.path.isdir(desktop):
             return desktop
-    # Fallback
     return os.path.join(os.getcwd(), "Desktop")
 
 
-# ─── Host Info ───────────────────────────────────────────────────────────────
+# ─── Headless detection ──────────────────────────────────────────────────────
+def _is_headless():
+    """Return True if no display is available."""
+    try:
+        if sys.platform == "win32":
+            try:
+                user32 = ctypes.windll.user32
+                return user32.GetSystemMetrics(1) == 0  # SM_CYSCREEN = 1
+            except Exception:
+                return True
+        else:
+            return not os.environ.get("DISPLAY", "")
+    except Exception:
+        return False
+
+
+# ─── Host Info ──────────────────────────────────────────────────────────────
 def get_host_info():
     return {
         "hostname": socket.gethostname(),
@@ -96,7 +107,7 @@ def run_cmd(cmd, timeout=10):
         return "", -1
 
 
-# ─── Controls ───────────────────────────────────────────────────────────────
+# ─── Controls ──────────────────────────────────────────────────────────────
 def check_a81_endpoint_policy():
     checks = [
         "C:\\Windows\\System32\\GroupPolicy",
@@ -114,7 +125,7 @@ def check_a82_privileged_access():
     guest_disabled = "Account active" in guest_out and "No" in guest_out
     rdp_out, _ = run_cmd('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server" /v fDenyTSConnections')
     rdp_disabled = "0x1" in rdp_out
-    evidence = f"Admin accounts: {len(admins)}. Guest disabled: {guest_disabled}. RDP disabled: {rdp_disabled}"
+    evidence = f"Admin accounts: {len(admins)}. Guest: {'disabled' if guest_disabled else 'enabled'}. RDP: {'disabled' if rdp_disabled else 'enabled'}"
     return len(admins) <= 4 and guest_disabled and rdp_disabled, f"Admin: {len(admins)}, Guest: {'disabled' if guest_disabled else 'enabled'}, RDP: {'disabled' if rdp_disabled else 'enabled'}", evidence
 
 
@@ -129,10 +140,10 @@ def check_a85_secure_auth():
     out, _ = run_cmd('net accounts')
     min_len = re.search(r"Minimum password length.*?(\d+)", out)
     min_pw = int(min_len.group(1)) if min_len else 0
+    pw_ok = min_pw >= 8
     mfa_out, _ = run_cmd('dir "C:\\Program Files\\Microsoft*Auth" 2>nul || dir "C:\\Program Files (x86)\\Microsoft*Auth" 2>nul || echo NONE')
     has_mfa = "NONE" not in mfa_out and mfa_out.strip()
-    pw_ok = min_pw >= 8
-    evidence = f"Min PW: {min_pw}. MFA: {has_mfa[:40] if has_mfa else 'Not detected'}"
+    evidence = f"Min PW: {min_pw} chars. MFA: {has_mfa[:40] if has_mfa else 'Not detected'}"
     return pw_ok, f"Min PW: {min_pw} chars", evidence
 
 
@@ -142,20 +153,18 @@ def check_a87_malware_protection():
     uac_out, _ = run_cmd('reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v EnableLUA')
     uac_on = "0x1" in uac_out
     evidence = f"Defender RT: {'On' if defender_on else 'Off'}, UAC: {'On' if uac_on else 'Off'}"
-    return (defender_on or uac_on) and uac_on, f"Defender: {'On' if defender_on else 'Off'}, UAC: {'On' if uac_on else 'Off'}", evidence
+    return uac_on, f"Defender: {'On' if defender_on else 'Off'}, UAC: {'On' if uac_on else 'Off'}", evidence
 
 
 def check_a88_vuln_management():
     out, _ = run_cmd('sc query wuauserv')
     wu_running = "RUNNING" in out
-    nessus_out, _ = run_cmd('dir "C:\\Program Files\\Tenable\\Nessus" 2>nul || echo NONE')
-    has_nessus = "NONE" not in nessus_out
-    evidence = f"WU service: {'Running' if wu_running else 'Stopped'}, VA scanner: {'Found' if has_nessus else 'Not found'}"
-    return wu_running, f"WU: {'Running' if wu_running else 'Stopped'}", evidence
+    evidence = f"Windows Update service: {'Running' if wu_running else 'Stopped'}"
+    return wu_running, f"WU service: {'Running' if wu_running else 'Stopped'}", evidence
 
 
 def check_a89_config_baseline():
-    fw_out, _ = run_cmd('netsh advfirefirewall show allprofiles state 2>nul || netsh firewall show state 2>nul || echo NONE')
+    fw_out, _ = run_cmd('netsh advfirewall show allprofiles state 2>nul || netsh firewall show state 2>nul || echo NONE')
     fw_on = "ON" in fw_out or "Enabled" in fw_out
     bitlocker_out, _ = run_cmd('manage-bde -status C: 2>nul || echo NOTAVAILABLE')
     bitlocker_on = "ON" in bitlocker_out or "Encryption" in bitlocker_out
@@ -191,9 +200,7 @@ def check_a813_backup():
 def check_a815_logging():
     out, _ = run_cmd('sc query Windows Event Log 2>nul | findstr STATE')
     log_service = "RUNNING" in out
-    audit_out, _ = run_cmd('auditpol /get /category:"Logon Events" 2>nul || echo NONE')
-    has_audit = "NONE" not in audit_out
-    evidence = f"Event Log: {'Running' if log_service else 'Stopped'}, Audit: {'Set' if has_audit else 'Not configured'}"
+    evidence = f"Event Log: {'Running' if log_service else 'Stopped'}"
     return log_service, f"Event Log: {'Running' if log_service else 'Stopped'}", evidence
 
 
@@ -247,7 +254,8 @@ def check_a824_cryptography():
 
 
 def check_a825_sdlc():
-    dev_tools = ["C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git", "C:\\Program Files\\Microsoft Visual Studio", "C:\\Program Files\\Docker"]
+    dev_tools = ["C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git",
+                 "C:\\Program Files\\Microsoft Visual Studio", "C:\\Program Files\\Docker"]
     found = [t for t in dev_tools if os.path.exists(t)]
     evidence = f"Dev tools: {', '.join([os.path.basename(f) for f in found]) if found else 'None detected'}"
     return len(found) == 0, f"Dev tools: {'None' if not found else ', '.join([os.path.basename(f) for f in found])}", evidence
@@ -268,7 +276,7 @@ def check_a831_change_management():
     return True, f"Change mgmt tasks: {'Found' if has_change else 'Not detected'}", evidence
 
 
-# ─── Control Registry ───────────────────────────────────────────────────────
+# ─── Control Registry ─────────────────────────────────────────────────────
 CONTROLS = [
     {"id":"A.8.1","title":"User Endpoint Devices","description":"Policy for secure configuration of all user endpoint devices shall be defined and communicated.","check_fn":check_a81_endpoint_policy,"category":"Endpoint Configuration","max_score":1},
     {"id":"A.8.2","title":"Privileged Access Rights","description":"Privileged access rights shall be restricted and managed in accordance with the access policy.","check_fn":check_a82_privileged_access,"category":"Access Control","max_score":2},
@@ -322,15 +330,10 @@ def run_assessment(progress_callback=None):
 
         status = "PASS" if passed else ("INFO" if max_score == 0 else "FAIL")
         results.append({
-            "id": ctrl["id"],
-            "title": ctrl["title"],
-            "category": ctrl["category"],
-            "description": ctrl["description"],
-            "status": status,
-            "score": score,
-            "max_score": max_score,
-            "value": value,
-            "evidence": evidence[:200],
+            "id": ctrl["id"], "title": ctrl["title"], "category": ctrl["category"],
+            "description": ctrl["description"], "status": status,
+            "score": score, "max_score": max_score,
+            "value": value, "evidence": evidence[:200],
         })
 
     return host_info, results, total_score, max_total
@@ -427,7 +430,6 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
     score_fill_color, score_font_color = _score_color(overall_pct)
     score_label = "GOOD COMPLIANCE" if overall_pct >= 80 else "PARTIAL COMPLIANCE" if overall_pct >= 50 else "NON-COMPLIANT"
     score_fill = PatternFill("solid", fgColor=score_fill_color)
-    score_font = Font(size=26, bold=True, color=score_font_color, name="Calibri")
 
     ws1.merge_cells(f"A{row}:F{row}")
     hdr(row, 1, "OVERALL ASSESSMENT SCORE", fill=blue_fill)
@@ -437,7 +439,7 @@ def _export_openpyxl(filepath, host_info, results, total_score, max_total):
     ws1.merge_cells(f"A{row}:C{row}")
     sc = ws1[f"A{row}"]
     sc.value = f"{total_score} / {max_total}"
-    sc.fill = score_fill; sc.font = score_font; sc.alignment = center
+    sc.fill = score_fill; sc.font = Font(size=26, bold=True, color=score_font_color, name="Calibri"); sc.alignment = center
     ws1.row_dimensions[row].height = 48
 
     ws1.merge_cells(f"D{row}:F{row}")
@@ -550,22 +552,19 @@ def _export_xlwt_fallback(filepath, host_info, results, total_score, max_total):
     wb.save(filepath)
 
 
-# ─── GUI App ─────────────────────────────────────────────────────────────────
+# ─── GUI App ────────────────────────────────────────────────────────────────
 def run_gui():
     root = tk.Tk()
     root.title("ISO 27001 Endpoint Assessment — Shah Scientific Solutions")
     root.resizable(False, False)
     root.configure(bg="#1F4E79")
 
-    # Center window
     root.update_idletasks()
-    w = 620
-    h = 320
+    w, h = 620, 320
     x = (root.winfo_screenwidth() // 2) - (w // 2)
     y = (root.winfo_screenheight() // 2) - (h // 2)
     root.geometry(f"{w}x{h}+{x}+{y}")
 
-    # Header
     header = tk.Frame(root, bg="#1F4E79", pady=12)
     header.pack(fill="x")
     tk.Label(header, text="ISO 27001:2022", bg="#1F4E79", fg="white",
@@ -575,7 +574,6 @@ def run_gui():
     tk.Label(header, text="Shah Scientific Solutions | vCISO Practice", bg="#1F4E79", fg="#BDD7EE",
              font=("Calibri", 9, "italic")).pack()
 
-    # Progress frame
     progress_frame = tk.Frame(root, bg="#2E75B6", pady=16, padx=24)
     progress_frame.pack(fill="both", expand=True)
 
@@ -594,26 +592,20 @@ def run_gui():
     pb["maximum"] = len(CONTROLS)
     pb["value"] = 0
 
-    result_label = tk.Label(progress_frame, text="", bg="#2E75B6", fg="white",
-                            font=("Calibri", 10, "bold"), anchor="w")
-    result_label.pack(anchor="w", pady=(10, 0))
-
     def update_progress(current, total, ctrl_title):
         pb["value"] = current
         status_label.config(text=f"  Checking: {ctrl_title}")
         root.update()
 
-    def on_complete(filepath, total_score, max_total, host_info, results):
+    def on_complete(filepath, total_score, max_total):
         pb["value"] = len(CONTROLS)
         overall_pct = int((total_score / max_total) * 100) if max_total > 0 else 0
-
-        # Clear frame
-        for widget in progress_frame.winfo_children():
-            widget.destroy()
-
         bg_color = "#C6EFCE" if overall_pct >= 80 else "#FFEB9C" if overall_pct >= 50 else "#FFC7CE"
         txt_color = "#375623" if overall_pct >= 80 else "#9C6500" if overall_pct >= 50 else "#9C0006"
         status_text = "GOOD COMPLIANCE" if overall_pct >= 80 else "PARTIAL COMPLIANCE" if overall_pct >= 50 else "NON-COMPLIANT"
+
+        for widget in progress_frame.winfo_children():
+            widget.destroy()
 
         result_label2 = tk.Label(progress_frame, text=f"{total_score} / {max_total}  ({overall_pct}%)",
                                  bg=bg_color, fg=txt_color, font=("Calibri", 26, "bold"))
@@ -634,6 +626,7 @@ def run_gui():
                 os.startfile(filepath)
             except Exception:
                 os.startfile(os.path.dirname(filepath))
+
         def close():
             root.destroy()
 
@@ -646,27 +639,26 @@ def run_gui():
                   padx=12, pady=4, relief="flat", cursor="hand2",
                   activebackground="#5A6268").pack(side="left", padx=4)
 
-        # Run assessment in background
         import threading
         def assess():
             h2, r2, ts2, mt2 = run_assessment()
             fp2 = export_excel(h2, r2, ts2, mt2)
-            root.after(0, lambda: on_complete(fp2, ts2, mt2, h2, r2))
+            root.after(0, lambda: on_complete(fp2, ts2, mt2))
 
         threading.Thread(target=assess, daemon=True).start()
 
-    # Start assessment immediately
-    on_complete(None, 0, 0, None, [])
-
+    root.after(0, lambda: on_complete(None, 0, 0))
     root.mainloop()
 
 
-# ─── Console fallback ────────────────────────────────────────────────────────
+# ─── Console Mode ────────────────────────────────────────────────────────────
 def run_console():
+    desktop = get_desktop_path()
     print("=" * 60)
     print("ISO 27001:2022 — Endpoint Technical Controls Assessment")
     print("Shah Scientific Solutions | vCISO Practice")
     print("=" * 60)
+    print(f"Desktop path: {desktop}")
     host_info = get_host_info()
     print(f"\nHost: {host_info['hostname']} | User: {host_info['username']}")
     print(f"OS: {host_info['os']}")
@@ -679,27 +671,12 @@ def run_console():
 
     overall_pct = int((total_score / max_total) * 100) if max_total > 0 else 0
     print(f"\nSCORE: {total_score} / {max_total}  ({overall_pct}%)")
-    print(f"Report: {export_excel(host_info, results, total_score, max_total)}")
+    filepath = export_excel(host_info, results, total_score, max_total)
+    print(f"Report: {filepath}")
+    return filepath
 
 
-def _is_headless():
-    """Detect if we're in a headless environment (no display)."""
-    try:
-        display = os.environ.get("DISPLAY", "")
-        if not display:
-            return True
-    except Exception:
-        pass
-    # On Windows, check if we're in a console-only environment
-    try:
-        if sys.platform == "win32":
-            import ctypes
-            user32 = ctypes.windll.user32
-            return user32.GetSystemMetrics(0) == 0  # SM_CXSCREEN = 0 means no display
-    except Exception:
-        pass
-    return False
-
+# ─── Main ──────────────────────────────────────────────────────────────────
 def main():
     headless = _is_headless()
     try:
@@ -711,25 +688,17 @@ def main():
                 run_gui()
             except Exception as e:
                 if headless:
-                    # In headless environment, just run the console version silently
                     run_console()
                 else:
                     import tkinter.messagebox
                     tkinter.messagebox.showerror("ISO 27001 Assessment",
-                        f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.\nSee: github.com/mominaali675-commits/iso27001-endpoint-tool")
+                        f"Failed to launch GUI:\n{e}\n\nPlease run with Python instead.")
                     raise SystemExit(1)
         else:
             run_console()
     except SystemExit:
         raise
     except Exception as e:
-        import traceback
-        err_file = os.path.join(os.environ.get("TEMP", "/tmp"), "iso27001_error.log")
-        try:
-            with open(err_file, "w") as f:
-                f.write(traceback.format_exc())
-        except Exception:
-            pass
         if not headless:
             try:
                 import tkinter.messagebox
